@@ -122,40 +122,6 @@ def get_assembly_guids(assembly_path):
                     guid_heap_index_length = 2 if ord(tilde[6:7]) & 0x02 == 0x00 else 4
                     blob_heap_index_length = 2 if ord(tilde[6:7]) & 0x04 == 0x00 else 4
 
-                    # Build row length for each type up to CustomAttr
-                    row_type_widths = [
-                        # 0x00 Module = Generation (2 bytes) + Name (String heap index) + Mvid (Guid heap index) +
-                        # EncId (Guid heap index) + EncBaseId (Guid heap index)
-                        2 + strings_heap_index_length + (guid_heap_index_length * 3),
-
-                        # 0x01 TypeRef = ResolutionScope (ResolutionScope index) + TypeName (String heap) +
-                        # TypeNamespace (String heap)
-                        2 + (strings_heap_index_length * 2),
-                        # 0x02 TypeDef = Flags(2 bytes) + TypeName(String heap index) +TypeNamespace(String heap index)+
-                        # Extends (TypeDefOrRef index) + FieldList (index into field table) +
-                        # MethodList (index into MethodDef table) + ?
-                        10 + (strings_heap_index_length * 2),
-                        0,  # 0x03 None
-                        # 0x04 Field = Flags (2 bytes) + Name (String heap index) + Signature (Blob heap index)
-                        2 + strings_heap_index_length + blob_heap_index_length,
-                        0,  # 0x05 None
-                        # 0x06 MethodDef = RVA(4 bytes) + ImplFlags(2 bytes) + Flags(2 bytes) + Name(String heap index)+
-                        # Signature (Blob heap index) + ParamList (index to param table)
-                        10 + strings_heap_index_length + blob_heap_index_length,
-                        0,  # 0x07 None
-                        # 0x08 Param = Flags (2 bytes) + Sequence (2 bytes) + Name (String heap index)
-                        4 + strings_heap_index_length,
-                        # 0x09 InterfaceImpl = Class (TypeDef index) + Interface (TypeDefOrRef index)
-                        4,
-                        # 0x0a MemberRef = Class(MemberRefParent) + Name(String heap index) + Signature(Blob heap index)
-                        2 + strings_heap_index_length + blob_heap_index_length,
-                        # 0x0b Constant = Type (?) + Parent + Value (Blob heap index)
-                        4 + blob_heap_index_length,
-                        # 0x0c CustomAttr = Parent + Type (CustomAttributeType) + Value (Blob heap index)
-                        4 + blob_heap_index_length,
-                        # Don't care about the rest
-                    ]
-
                     # print "Reserved 0x01: {0}".format([tilde[7:8]])
                     # print "Table list: {0}".format([tilde[8:16]])
 
@@ -171,6 +137,57 @@ def get_assembly_guids(assembly_path):
                         if tables_present[index]:
                             row_counts[index] = struct.unpack("<I", tilde[t_offset:t_offset + 4])[0]
                             t_offset += 4
+
+                    has_custom_attribute_tables = [
+                        0x06, 0x04, 0x01, 0x02, 0x08, 0x09, 0x0A, 0x00,
+                        0x0E, # Permission aka DeclSecurity (typo in the spec)
+                        0x17, 0x14, 0x11, 0x1A, 0x1B, 0x20, 0x23, 0x26,
+                        0x27, 0x2A, 0x2C, 0x2B
+                    ]
+                    custom_attribute_type_tables = [0x06, 0x0A]
+                    resolution_scope_tables = [0x00, 0x1A, 0x23, 0x01]
+                    type_def_or_ref_tables = [0x02, 0x01, 0x1B]
+                    member_ref_tables = [0x02, 0x01, 0x1A, 0x06, 0x1B]
+
+                    big_has_custom_attribute = any([row_counts[x] >= 2**(16 - 5) for x in has_custom_attribute_tables])
+                    big_custom_attribute_type = any([row_counts[x] >= 2**(16 - 3) for x in custom_attribute_type_tables])
+                    big_resolution_scope = any([row_counts[x] >= 2**(16 - 2) for x in resolution_scope_tables])
+                    big_type_def_or_ref = any([row_counts[x] >= 2**(16 - 2) for x in type_def_or_ref_tables])
+                    big_member_ref_parent = any([row_counts[x] >= 2**(16 - 3) for x in member_ref_tables])
+
+                    # Build row length for each type up to CustomAttr
+                    row_type_widths = [
+                        # 0x00 Module = Generation (2 bytes) + Name (String heap index) + Mvid (Guid heap index) +
+                        # EncId (Guid heap index) + EncBaseId (Guid heap index)
+                        2 + strings_heap_index_length + (guid_heap_index_length * 3),
+
+                        # 0x01 TypeRef = ResolutionScope (ResolutionScope index) + TypeName (String heap) +
+                        # TypeNamespace (String heap)
+                        (4 if big_resolution_scope else 2) + (strings_heap_index_length * 2),
+                        # 0x02 TypeDef = Flags(2 bytes) + TypeName(String heap index) +TypeNamespace(String heap index)+
+                        # Extends (TypeDefOrRef index) + FieldList (index into field table) +
+                        # MethodList (index into MethodDef table) + ?
+                        8 + (4 if big_type_def_or_ref else 2) + (strings_heap_index_length * 2),
+                        0,  # 0x03 None
+                        # 0x04 Field = Flags (2 bytes) + Name (String heap index) + Signature (Blob heap index)
+                        2 + strings_heap_index_length + blob_heap_index_length,
+                        0,  # 0x05 None
+                        # 0x06 MethodDef = RVA(4 bytes) + ImplFlags(2 bytes) + Flags(2 bytes) + Name(String heap index)+
+                        # Signature (Blob heap index) + ParamList (index to param table)
+                        10 + strings_heap_index_length + blob_heap_index_length,
+                        0,  # 0x07 None
+                        # 0x08 Param = Flags (2 bytes) + Sequence (2 bytes) + Name (String heap index)
+                        4 + strings_heap_index_length,
+                        # 0x09 InterfaceImpl = Class (TypeDef index) + Interface (TypeDefOrRef index)
+                        2 + (4 if big_type_def_or_ref else 2),
+                        # 0x0a MemberRef = Class(MemberRefParent) + Name(String heap index) + Signature(Blob heap index)
+                        (4 if big_member_ref_parent else 2) + strings_heap_index_length + blob_heap_index_length,
+                        # 0x0b Constant = Type (?) + Parent + Value (Blob heap index)
+                        4 + blob_heap_index_length,
+                        # 0x0c CustomAttr = Parent + Type (CustomAttributeType) + Value (Blob heap index)
+                        (4 if big_has_custom_attribute else 2) + (4 if big_custom_attribute_type else 2) + blob_heap_index_length,
+                        # Don't care about the rest
+                    ]
 
                     for index in xrange(0x0c):
                         t_offset += row_type_widths[index] * row_counts[index]
