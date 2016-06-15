@@ -192,19 +192,47 @@ def get_assembly_guids(assembly_path):
                     for index in xrange(0x0c):
                         t_offset += row_type_widths[index] * row_counts[index]
 
-                    # todo Resolve type indexes
-                    # todo Add identification by parent and type
                     for index in xrange(row_counts[0x0c]):
-                        parent_index = struct.unpack("<H", tilde[t_offset:t_offset + 2])[0]
-                        # type_index = struct.unpack("<H", tilde[t_offset + 2:t_offset + 4])[0]
-                        if blob_heap_index_length == 2:
-                            blob_index = struct.unpack("<H", tilde[t_offset + 4:t_offset + 6])[0]
-                            data_value = read_blob(heaps["#Blob"][blob_index:])
+                        # In the most strict interpretation, a typelib id is expressed as a
+                        # GuidAttribute on the current assembly.
+                        # To check that it's actually a GuidAttribute we'd have to support parsing
+                        # .NET signatures, so it's safer to assume a MemberRef attribute owned by a
+                        # TypeRef on an AssemblyRow with a value matching a guid is PROBABLY the typelib id
+
+                        row_offset = t_offset
+
+                        if big_has_custom_attribute:
+                            parent_index = struct.unpack("<I", tilde[row_offset:row_offset + 4])[0]
+                            row_offset += 4
                         else:
-                            blob_index = struct.unpack("<I", tilde[t_offset + 4:t_offset + 8])[0]
+                            parent_index = struct.unpack("<H", tilde[row_offset:row_offset + 2])[0]
+                            row_offset += 2
+
+                        if big_custom_attribute_type:
+                            type_index = struct.unpack("<I", tilde[row_offset:row_offset + 4])[0]
+                            row_offset += 4
+                        else:
+                            type_index = struct.unpack("<H", tilde[row_offset:row_offset + 2])[0]
+                            row_offset += 2
+
+                        parent_index_table = parent_index & 0x1f
+                        type_index_table = type_index & 0x07
+
+                        # We only really care if the parent is an Assembly and the attribute is constructed
+                        # using a MemberRef. MemberRef because a MethodDef is never going to be used for a
+                        # GuidAttribute. This is because GuidAttribute is from mscorlib, so always an external
+                        # assembly, so always reached via TypeRef/MemberRef.
+                        if parent_index_table == 0x0e and type_index_table == 0x03:
+                            if blob_heap_index_length == 2:
+                                blob_index = struct.unpack("<H", tilde[row_offset:row_offset + 2])[0]
+                                row_offset += 2
+                            else:
+                                blob_index = struct.unpack("<I", tilde[row_offset:row_offset + 4])[0]
+                                row_offset += 4
+
                             data_value = read_blob(heaps["#Blob"][blob_index:])
-                        if guid_regex.match(data_value):
-                            return {"mvid": extracted_mvid.lower(), "typelib_id": data_value.lower(), "compiled": compiled}
+                            if guid_regex.match(data_value):
+                                return {"mvid": extracted_mvid.lower(), "typelib_id": data_value.lower(), "compiled": compiled}
                         t_offset += row_type_widths[0x0c]
                     return {"mvid": extracted_mvid.lower(), "compiled": compiled}
             except KeyboardInterrupt:
