@@ -131,10 +131,10 @@ def get_assembly_guids(assembly_path):
 
                     # print "Which tables are sorted list: {0}".format([tilde[16:24]])
 
-                    row_counts = [0] * len(tables_present)
+                    row_counts = [0] * 64
                     t_offset = 24
                     for index in xrange(len(tables_present)):
-                        if tables_present[index]:
+                        if index < len(tables_present) and tables_present[index]:
                             row_counts[index] = struct.unpack("<I", tilde[t_offset:t_offset + 4])[0]
                             t_offset += 4
 
